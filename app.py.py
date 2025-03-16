@@ -15,24 +15,25 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import pickle
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.metrics import accuracy_score, classification_report, mean_squared_error, r2_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.feature_selection import VarianceThreshold
+from sklearn.metrics import accuracy_score, classification_report, mean_squared_error, r2_score, precision_score, recall_score, f1_score
 
 # ✅ Suppress warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="streamlit")
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logging.getLogger("streamlit").setLevel(logging.ERROR)
 
-# ------------------------------------
-# 🎨 Streamlit UI Customization
-# ------------------------------------
 st.set_page_config(page_title="Automated Data Analysis & ML Pipeline", layout="wide")
-
-# Sidebar
 st.sidebar.title("🔍 Navigation")
 page = st.sidebar.radio("Go to:", ["Upload Data", "EDA", "ML Training"])
-
 st.title("🚀 Automated Data Analysis & ML Pipeline")
 
 # ------------------------------------
@@ -41,7 +42,6 @@ st.title("🚀 Automated Data Analysis & ML Pipeline")
 if page == "Upload Data":
     st.header("📂 Upload Your Dataset")
     uploaded_file = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx"])
-
     if uploaded_file:
         df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
         st.write("### 📌 Data Preview:")
@@ -55,11 +55,16 @@ elif page == "EDA":
     if "df" in st.session_state:
         df = st.session_state.df
         st.header("📊 Exploratory Data Analysis")
-
+        
+        # 🧹 Handle Duplicates
+        if st.checkbox("Remove Duplicates"):
+            df.drop_duplicates(inplace=True)
+        
+        # 🔍 Missing Values
         st.subheader("🔍 Missing Values")
         missing_values = df.isnull().sum()
         st.write(missing_values[missing_values > 0])
-
+        
         handle_missing = st.selectbox("How to handle missing values?", ["Mean Imputation", "Median Imputation", "Drop Rows", "Do Nothing"])
         if handle_missing == "Mean Imputation":
             df.fillna(df.mean(), inplace=True)
@@ -67,13 +72,20 @@ elif page == "EDA":
             df.fillna(df.median(), inplace=True)
         elif handle_missing == "Drop Rows":
             df.dropna(inplace=True)
-
-        st.write("### ✅ Data after Handling Missing Values:")
-        st.dataframe(df.head())
-
-        st.subheader("📊 Data Distribution")
+        
+        # 📊 Summary Statistics
+        st.subheader("📊 Summary Statistics")
+        st.write(df.describe())
+        
+        # 📊 Data Distribution
         selected_column = st.selectbox("Select a Column for Visualization", df.columns)
         fig = px.histogram(df, x=selected_column, title=f"Distribution of {selected_column}", color_discrete_sequence=['blue'])
+        st.plotly_chart(fig)
+        
+        # 📊 Correlation Matrix
+        st.subheader("📈 Correlation Matrix")
+        corr_matrix = df.corr()
+        fig = px.imshow(corr_matrix, text_auto=True, title="Correlation Heatmap")
         st.plotly_chart(fig)
 
 # ------------------------------------
@@ -83,23 +95,65 @@ elif page == "ML Training":
     if "df" in st.session_state:
         df = st.session_state.df
         st.header("🤖 Machine Learning Model Training")
+        
         target = st.selectbox("🎯 Select the Target Variable", df.columns)
         features = [col for col in df.columns if col != target]
-        X_train, X_test, y_train, y_test = train_test_split(df[features], df[target], test_size=0.2, random_state=42)
-
+        X = df[features]
+        y = df[target]
+        
+        # Encoding categorical features
+        for col in X.select_dtypes(include=['object']).columns:
+            X[col] = LabelEncoder().fit_transform(X[col])
+        
+        # Feature Scaling
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        
+        # Feature Selection
+        selector = VarianceThreshold(threshold=0.01)
+        X_selected = selector.fit_transform(X_scaled)
+        
+        X_train, X_test, y_train, y_test = train_test_split(X_selected, y, test_size=0.2, random_state=42)
+        
         st.subheader("⚙️ Model Selection")
-        model_type = st.radio("Select Task Type", ["Classification", "Regression"])
-        model = RandomForestClassifier() if model_type == "Classification" else RandomForestRegressor()
+        model_choice = st.selectbox("Select Model", ["Random Forest", "Logistic Regression", "SVM", "Decision Tree"])
+        
+        if model_choice == "Random Forest":
+            model = RandomForestClassifier() if df[target].nunique() <= 10 else RandomForestRegressor()
+        elif model_choice == "Logistic Regression":
+            model = LogisticRegression()
+        elif model_choice == "SVM":
+            model = SVC()
+        else:
+            model = DecisionTreeClassifier()
+        
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
-
+        
         st.header("📉 Model Evaluation")
-        if model_type == "Classification":
+        if df[target].nunique() <= 10:  # Classification
             acc = accuracy_score(y_test, y_pred)
+            prec = precision_score(y_test, y_pred, average='weighted')
+            rec = recall_score(y_test, y_pred, average='weighted')
+            f1 = f1_score(y_test, y_pred, average='weighted')
             st.write(f"### ✅ Accuracy: {acc:.2f}")
+            st.write(f"### 🎯 Precision: {prec:.2f}")
+            st.write(f"### 🔥 Recall: {rec:.2f}")
+            st.write(f"### 📊 F1-score: {f1:.2f}")
             st.text(classification_report(y_test, y_pred))
-        else:
+        else:  # Regression
             mse = mean_squared_error(y_test, y_pred)
             r2 = r2_score(y_test, y_pred)
             st.write(f"### 📉 Mean Squared Error: {mse:.2f}")
             st.write(f"### 📊 R-Squared: {r2:.2f}")
+        
+        # 📊 Prediction vs Actual Values
+        st.subheader("Predictions vs Actual Values")
+        fig = px.scatter(x=y_test, y=y_pred, labels={'x': 'Actual', 'y': 'Predicted'}, title="Predictions vs Actual Values")
+        st.plotly_chart(fig)
+        
+        # 💾 Save Model
+        st.subheader("💾 Save & Download Model")
+        with open("trained_model.pkl", "wb") as f:
+            pickle.dump(model, f)
+        st.download_button("Download Model", "trained_model.pkl")
