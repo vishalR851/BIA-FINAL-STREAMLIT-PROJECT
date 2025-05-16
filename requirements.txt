@@ -1,8 +1,8 @@
 streamlit
-shap
 pandas
 numpy
-scikit-learn
-xgboost
 matplotlib
 seaborn
+scikit-learn
+imblearn
+shap
