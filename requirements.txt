@@ -1,5 +1,8 @@
 streamlit
+shap
 pandas
 numpy
 scikit-learn
-plotly
+xgboost
+matplotlib
+seaborn
